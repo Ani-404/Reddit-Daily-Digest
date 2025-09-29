@@ -1,0 +1,15 @@
+{
+  "output_dir": "data",
+  "sites": [
+    {
+      "name": "MachineLearning",
+      "url": "https://www.reddit.com/r/MachineLearning/",
+      "posts_to_scrape": 10
+    },
+    {
+      "name": "DataScience",
+      "url": "https://www.reddit.com/r/datascience/",
+      "posts_to_scrape": 10
+    }
+  ]
+}
