@@ -42,13 +42,18 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           git config user.name "${{ github.actor }}"
           git config user.email "${{ github.actor }}@users.noreply.github.com"
 
+          # stage output dir (no-op if missing)
           git add data || true
 
-          if ! git diff --staged --quiet; then
+          # If there are staged changes, commit & push. Otherwise print message.
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
             git commit -m "Daily Digest: update data and report — $(date --utc +'%Y-%m-%dT%H:%M:%SZ')"
             git push
-          else
-            echo "No changes to commit."
+          fi
+
