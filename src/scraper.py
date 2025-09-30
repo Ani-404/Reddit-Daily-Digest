@@ -5,6 +5,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 def scrape_site(site_config):
     """
@@ -30,44 +32,36 @@ def scrape_site(site_config):
     driver = webdriver.Chrome(service=service, options=chrome_options)
 
     driver.get(site_config['url'])
-    time.sleep(2)  # Wait for the page to load
+    wait = WebDriverWait(driver, 5)
 
     posts_data = []
-    posts = driver.find_elements(By.CSS_SELECTOR, 'div.Post')
+    posts = driver.find_elements(By.CSS_SELECTOR, 'div.thing')
 
     for post in posts[:site_config['posts_to_scrape']]:
         try:
-            title = post.find_element(By.CSS_SELECTOR, "h3").text
-            url = post.find_element(By.CSS_SELECTOR, "a[data-click-id='body']").get_attribute("href")
+            title_element = post.find_element(By.CSS_SELECTOR, 'a.title')
+            score_element = post.find_element(By.CSS_SELECTOR, 'div.score')
 
-            # Get score if present
-            try:
-                score_text = post.find_element(By.CSS_SELECTOR, "div[data-click-id='score']").text
-            except:
-                score_text = "0"
-            score = 0
-            if "k" in score_text.lower():
-                score = int(float(score_text.lower().replace("k", "")) * 1000)
-            elif score_text.isdigit():
-                score = int(score_text)
+            title = title_element.text.strip()
+            url = title_element.get_attribute('href')
 
-            # Get content if available
-            try:
-                content = post.find_element(By.CSS_SELECTOR, "div[data-click-id='text']").text
-            except:
-                content = ""
+            # Safe score parsing
+            score_text = score_element.text.strip()
+            import re
+            match = re.search(r'\d+', score_text.replace(',', ''))
+            score = int(match.group()) if match else 0
 
             posts_data.append({
-                "title": title,
-                "url": url,
-                "score": score,
-                "content": content,
-                "source": site_config['name']
+                'title': title,
+                'url': url,
+                'score': score,
+                'source': site_config['name']
             })
-
         except Exception as e:
-            print(f"Error parsing post: {e}")
+            print(f"Error parsing a post: {e}")
             continue
+
+
 
     driver.quit()
     print(f"Found {len(posts_data)} posts from {site_config['name']}.")
