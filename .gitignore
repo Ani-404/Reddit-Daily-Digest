@@ -14,10 +14,6 @@ ENV/
 scraper-env/
 *.log
 
-# --- Data Outputs ---
-data/*.csv
-data/*.html
-
 # --- Selenium / Webdriver ---
 chromedriver
 chromedriver.exe
