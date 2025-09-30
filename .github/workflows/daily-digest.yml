@@ -2,7 +2,7 @@ name: Daily Digest (scrape & publish)
 
 on:
   schedule:
-    - cron: '0 10 * * *'       # runs daily at 01:00 UTC 
+    - cron: '15 10 * * *'      # runs daily at 15:45 IST (10:15 UTC)
   workflow_dispatch:           # allows manual runs from Actions UI
 
 jobs:
