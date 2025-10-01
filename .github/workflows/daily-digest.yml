@@ -2,7 +2,7 @@ name: Daily Digest (scrape & publish)
 
 on:
   schedule:
-    - cron: '0 10 * * *'      # daily at 15:30 IST (10:00 UTC)
+    - cron: '0 10 * * *'     # daily at 15:30 IST
   workflow_dispatch:
 
 jobs:
@@ -19,15 +19,19 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install apt dependencies and Chrome
+      - name: Install apt dependencies and Google Chrome
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget gnupg unzip
-          # Add Google Chrome repo and key
+          sudo apt-get install -y wget gnupg unzip ca-certificates
           wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
           echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
           sudo apt-get update
           sudo apt-get install -y google-chrome-stable
+
+      - name: Confirm Chrome is available
+        run: |
+          which google-chrome || which google-chrome-stable || which chromium-browser || true
+          google-chrome --version || google-chrome-stable --version || chromium-browser --version || true
 
       - name: Install Python dependencies
         run: |
@@ -35,7 +39,7 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Run daily digest script
-        # change to 'python src/main.py' if needed
+        # adjust path if your main is in src/
         run: python main.py
 
       - name: Commit and push outputs if changed
@@ -46,14 +50,11 @@ jobs:
           git config user.name "${{ github.actor }}"
           git config user.email "${{ github.actor }}@users.noreply.github.com"
 
-          # stage output dir (no-op if missing)
           git add data || true
 
-          # If there are staged changes, commit & push. Otherwise print message.
           if git diff --staged --quiet; then
             echo "No changes to commit."
           else
             git commit -m "Daily Digest: update data and report — $(date --utc +'%Y-%m-%dT%H:%M:%SZ')"
             git push
           fi
-
