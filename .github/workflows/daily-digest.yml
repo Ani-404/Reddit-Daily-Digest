@@ -2,13 +2,12 @@ name: Daily Digest (scrape & publish)
 
 on:
   schedule:
-    - cron: '15 10 * * *'      # runs daily at 15:45 IST (10:15 UTC)
-  workflow_dispatch:           # allows manual runs from Actions UI
+    - cron: '0 10 * * *'      # daily at 15:30 IST (10:00 UTC)
+  workflow_dispatch:
 
 jobs:
   run-and-commit:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -20,15 +19,28 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install apt dependencies and Chrome
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget gnupg unzip
+          # Add Google Chrome repo and key
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Run daily digest script
+        # change to 'python src/main.py' if needed
         run: python main.py
 
       - name: Commit and push outputs if changed
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "${{ github.actor }}"
           git config user.email "${{ github.actor }}@users.noreply.github.com"
@@ -40,6 +52,3 @@ jobs:
             git push
           else
             echo "No changes to commit."
-          fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
