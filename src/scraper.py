@@ -1,4 +1,6 @@
+# src/scraper.py
 import time
+import re
 import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -8,77 +10,135 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
+def _safe_parse_score(score_text: str) -> int:
+    score_text = (score_text or "").strip()
+    # extract first integer (handles "1,234" and plain numbers)
+    m = re.search(r'(\d[\d,]*)', score_text)
+    if not m:
+        return 0
+    return int(m.group(1).replace(',', ''))
+
 def scrape_site(site_config):
     """
-    Scrapes a single site (e.g., a subreddit) based on the provided configuration.
-    Each site_config should have: 
-    - 'name': site name (string)
-    - 'url': subreddit URL
-    - 'posts_to_scrape': number of posts to fetch
+    Scrapes a single site (e.g., a subreddit) based on site_config:
+      - name
+      - url
+      - posts_to_scrape
     """
     print(f"Scraping site: {site_config['name']}")
 
-    # Setup headless Chrome
+    # Setup Chrome options (CI-friendly)
     chrome_options = Options()
-    chrome_options.add_argument("--headless")
+    # Use new headless mode for recent Chrome + Selenium
+    chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage") 
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--window-size=1920,1080")
+    # Make it look like a normal browser
     chrome_options.add_argument(
         "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
     )
+    # Reduce automation flags
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option("useAutomationExtension", False)
 
     service = ChromeService(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=chrome_options)
 
-    driver.get(site_config['url'])
-    wait = WebDriverWait(driver, 5)
+    try:
+        driver.get(site_config['url'])
+        # Wait up to 10s for posts to appear (old.reddit uses div.thing)
+        wait = WebDriverWait(driver, 10)
 
-    posts_data = []
-    posts = driver.find_elements(By.CSS_SELECTOR, 'div.thing')
-
-    for post in posts[:site_config['posts_to_scrape']]:
         try:
-            title_element = post.find_element(By.CSS_SELECTOR, 'a.title')
-            score_element = post.find_element(By.CSS_SELECTOR, 'div.score')
+            posts = wait.until(
+                EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div.thing"))
+            )
+        except Exception:
+            # Fallback: try new reddit structure
+            try:
+                posts = wait.until(
+                    EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div[data-testid='post-container']"))
+                )
+            except Exception:
+                posts = []
 
-            title = title_element.text.strip()
-            url = title_element.get_attribute('href')
+        posts_data = []
+        for post in posts[: site_config.get("posts_to_scrape", 10)]:
+            try:
+                # Try old-reddit title first
+                try:
+                    title_element = post.find_element(By.CSS_SELECTOR, "a.title")
+                    title = title_element.text.strip()
+                    url = title_element.get_attribute("href")
+                except Exception:
+                    # Try new Reddit clickable body link as title
+                    try:
+                        title_element = post.find_element(By.CSS_SELECTOR, "a[data-click-id='body']")
+                        title = title_element.text.strip()
+                        url = title_element.get_attribute("href")
+                    except Exception:
+                        # If no title found, skip
+                        raise RuntimeError("no title element found")
 
-            # Safe score parsing
-            score_text = score_element.text.strip()
-            import re
-            match = re.search(r'\d+', score_text.replace(',', ''))
-            score = int(match.group()) if match else 0
+                # Score: try common selectors (old reddit then new reddit)
+                score_text = ""
+                try:
+                    score_text = post.find_element(By.CSS_SELECTOR, "div.score").text
+                except Exception:
+                    try:
+                        score_text = post.find_element(By.CSS_SELECTOR, "div[data-click-id='score']").text
+                    except Exception:
+                        score_text = ""
 
-            posts_data.append({
-                'title': title,
-                'url': url,
-                'score': score,
-                'source': site_config['name']
-            })
-        except Exception as e:
-            print(f"Error parsing a post: {e}")
-            continue
+                score = _safe_parse_score(score_text)
 
+                # Try to get content/body text if present
+                content = ""
+                try:
+                    # old reddit
+                    content = post.find_element(By.CSS_SELECTOR, "div.expando, div.md, div.usertext-body").text
+                except Exception:
+                    try:
+                        # new reddit
+                        content = post.find_element(By.CSS_SELECTOR, "div[data-click-id='text']").text
+                    except Exception:
+                        content = ""
 
+                posts_data.append(
+                    {
+                        "title": title,
+                        "url": url,
+                        "score": score,
+                        "content": content,
+                        "source": site_config.get("name"),
+                    }
+                )
+            except Exception as e:
+                print(f"Error parsing a post: {e}")
+                continue
 
-    driver.quit()
-    print(f"Found {len(posts_data)} posts from {site_config['name']}.")
-    return pd.DataFrame(posts_data)
+        print(f"Found {len(posts_data)} posts from {site_config['name']}.")
+        return pd.DataFrame(posts_data)
+
+    finally:
+        driver.quit()
+
 
 def scrape_all_sites(configs):
-    """Iterates through site configurations and scrapes each one."""
+    """Iterate site configs and collect results."""
     all_dataframes = []
     for site_config in configs:
         df = scrape_site(site_config)
-        if not df.empty:
+        if df is not None and not df.empty:
             all_dataframes.append(df)
 
     if not all_dataframes:
         return pd.DataFrame()
 
     combined_df = pd.concat(all_dataframes, ignore_index=True)
-    combined_df.sort_values(by="score", ascending=False, inplace=True)
+    if "score" in combined_df.columns:
+        combined_df.sort_values(by="score", ascending=False, inplace=True)
     return combined_df
-            
